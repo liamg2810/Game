@@ -8,6 +8,7 @@ const Nodes = {
 	WOOD: 2,
 	WATER: 3,
 	GRASS: 4,
+	SAND: 5,
 };
 
 function fade(t) {
@@ -84,10 +85,21 @@ class ResourceNode {
 	}
 }
 
+/** @type {x1: number, y1: number, w1: number, h1: number, x2: number, y2: number, w2: number, h2: number} */
+function AABB(x1, y1, w1, h1, x2, y2, w2, h2) {
+	return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+}
+
 class Game {
 	pollution = 0;
 
+	/**@type {ResourceNode[]} */
 	map = [];
+
+	/**@type {ResourceNode[]} */
+	culledMap = [];
+
+	/** @type {{startX: number, startY: number, height: number, type: Nodes}[]} */
 	renderMap = [];
 
 	rows = 500;
@@ -106,6 +118,8 @@ class Game {
 
 	mouseX = 0;
 	mouseY = 0;
+	/** @type {ResourceNode | null} */
+	hoveredNode = null;
 
 	constructor() {
 		console.log(this.colWidth);
@@ -139,6 +153,10 @@ class Game {
 					node = Nodes.STONE;
 				}
 
+				if (waterVal < 0.42) {
+					node = Nodes.SAND;
+				}
+
 				if (waterVal < 0.4) {
 					node = Nodes.WATER;
 				}
@@ -157,55 +175,112 @@ class Game {
 	CalculateRenderMap() {
 		const cL = gameCanvas.getBoundingClientRect().x;
 		const cT = gameCanvas.getBoundingClientRect().y;
-		let w = Math.round(this.colWidth * this.scale * 10) / 10;
+		let w = this.colWidth * this.scale;
 		let h = this.rowHeight * this.scale;
-		const cW = gameCanvas.getBoundingClientRect().width / w;
-		const cH = gameCanvas.getBoundingClientRect().height / h;
-
+		const cW = gameCanvas.width;
+		const cH = gameCanvas.height;
 		this.renderMap = [];
 
-		this.map.forEach((node) => {
-			const x = node.x - this.XOffset;
-			const y = node.y - this.YOffset;
+		this.culledMap = [];
 
-			if (x < 0 || x > cW || y < 0 || y > cH) {
+		this.map.forEach((node) => {
+			const x = node.x * w + this.XOffset;
+			const y = node.y * h + this.YOffset;
+
+			if (x + w < 0 || x > cW + w || y + h < 0 || y > cH + h) {
 				return;
 			}
 
-			this.renderMap.push(node);
+			this.culledMap.push(node);
 		});
 
-		console.log(this.map.length, this.renderMap.length);
+		if (this.culledMap.length === 0) {
+			return;
+		}
+
+		let chainNodeTypeStartPos = {
+			x: this.culledMap[0].x * w + this.XOffset,
+			y: this.culledMap[0].y * h + this.YOffset,
+		};
+		let chainNodeType = this.culledMap[0].type;
+		let lastY = 0;
+
+		this.culledMap.forEach((node) => {
+			const x = node.x * w + this.XOffset;
+			const y = node.y * h + this.YOffset;
+
+			if (x !== chainNodeTypeStartPos.x) {
+				this.renderMap.push({
+					startX: chainNodeTypeStartPos.x,
+					startY: chainNodeTypeStartPos.y,
+					height: lastY - chainNodeTypeStartPos.y,
+					type: chainNodeType,
+				});
+
+				chainNodeTypeStartPos = { x: x, y: y };
+				chainNodeType = node.type;
+
+				return;
+			}
+
+			if (node.type === chainNodeType) {
+				lastY = y;
+				return;
+			}
+
+			this.renderMap.push({
+				startX: chainNodeTypeStartPos.x,
+				startY: chainNodeTypeStartPos.y,
+				height: y - chainNodeTypeStartPos.y,
+				type: chainNodeType,
+			});
+
+			chainNodeTypeStartPos = { x: x, y: y };
+			chainNodeType = node.type;
+			lastY = y;
+		});
 	}
 
 	GetMouseHover() {
-		// this.map.forEach((node) => {
-		// 	let w = Math.round(this.colWidth * this.scale * 10) / 10;
-		// 	let h = this.rowHeight * this.scale;
-		// 	const x = node.x * w + this.XOffset;
-		// 	if (x > gameCanvas.clientWidth - gameCanvas.clientLeft || x < 0) {
-		// 		return;
-		// 	}
-		// 	const y = node.y * h + this.YOffset;
-		// 	if (y > gameCanvas.clientHeight - gameCanvas.clientTop || y < 0) {
-		// 		return;
-		// 	}
-		// 	if (x + gameCanvas.clientLeft === this.mouseX) {
-		// 		console.log("same X");
-		// 	}
-		// });
+		const xPos = this.mouseX - gameCanvas.getBoundingClientRect().x;
+		const yPos = this.mouseY - gameCanvas.getBoundingClientRect().y;
+
+		const w = gameCanvas.getBoundingClientRect().width / gameCanvas.width;
+		const h = gameCanvas.getBoundingClientRect().height / gameCanvas.height;
+
+		const relativeX = xPos / w;
+		const relativeY = yPos / h;
+
+		this.hoveredNode = null;
+
+		for (let node of this.culledMap) {
+			if (
+				AABB(
+					relativeX,
+					relativeY,
+					this.scale,
+					this.scale,
+					node.x + this.colWidth * this.scale + this.XOffset,
+					node.y + this.rowHeight * this.scale + this.YOffset,
+					this.colWidth * this.scale,
+					this.rowHeight * this.scale
+				)
+			) {
+				console.log(node);
+				this.hoveredNode = node;
+				break;
+			}
+		}
 	}
 
 	DrawMap() {
 		ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
 
-		this.renderMap.forEach((node) => {
-			let w = this.colWidth * this.scale;
-			let h = this.rowHeight * this.scale;
+		if (this.renderMap.length === 0) {
+			return;
+		}
 
-			const x = node.x * w + this.XOffset;
-			const y = node.y * h + this.YOffset;
-
+		for (let node of this.renderMap) {
 			ctx.fillStyle = "rgb(0,225, 0)";
 
 			if (node.type === Nodes.STONE) {
@@ -220,8 +295,45 @@ class Game {
 				ctx.fillStyle = "rgb(0, 125, 0)";
 			}
 
-			ctx.fillRect(x, y, w, h);
-		});
+			if (node.type === Nodes.SAND) {
+				ctx.fillStyle = "rgb(246,215,176)";
+			}
+
+			ctx.fillRect(
+				node.startX,
+				node.startY,
+				this.colWidth * this.scale + 1,
+				node.height
+			);
+		}
+
+		ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+
+		const xPos = this.mouseX - gameCanvas.getBoundingClientRect().x;
+		const yPos = this.mouseY - gameCanvas.getBoundingClientRect().y;
+
+		const w = gameCanvas.getBoundingClientRect().width / gameCanvas.width;
+		const h = gameCanvas.getBoundingClientRect().height / gameCanvas.height;
+
+		const mouseSize = this.colWidth * this.scale;
+
+		ctx.fillRect(
+			xPos / w - mouseSize / 2,
+			yPos / h - mouseSize / 2,
+			mouseSize,
+			mouseSize
+		);
+
+		if (this.hoveredNode !== null) {
+			ctx.fillStyle = "rgba(0, 174, 255, 0.5)";
+
+			ctx.fillRect(
+				this.hoveredNode.x + this.colWidth * this.scale + this.XOffset,
+				this.hoveredNode.y + this.rowHeight * this.scale + this.YOffset,
+				this.colWidth * this.scale,
+				this.rowHeight * this.scale
+			);
+		}
 	}
 
 	Update() {
@@ -233,28 +345,28 @@ class Game {
 
 		let shouldFindRenderMap = false;
 
-		if (this.keyMap.has("s")) {
+		if (this.keyMap.has("s") || this.keyMap.has("arrowdown")) {
 			shouldFindRenderMap = true;
 			this.YOffset -= MoveScale;
 		}
 
-		if (this.keyMap.has("w")) {
+		if (this.keyMap.has("w") || this.keyMap.has("arrowup")) {
 			shouldFindRenderMap = true;
 
 			this.YOffset += MoveScale;
 		}
 
-		if (this.keyMap.has("a")) {
+		if (this.keyMap.has("a") || this.keyMap.has("arrowleft")) {
 			shouldFindRenderMap = true;
 			this.XOffset += MoveScale;
 		}
 
-		if (this.keyMap.has("d")) {
+		if (this.keyMap.has("d") || this.keyMap.has("arrowright")) {
 			shouldFindRenderMap = true;
 			this.XOffset -= MoveScale;
 		}
 
-		if (true) {
+		if (shouldFindRenderMap) {
 			this.CalculateRenderMap();
 		}
 
@@ -262,7 +374,7 @@ class Game {
 
 		this.lastFrameTime = Date.now();
 
-		setTimeout(this.Update.bind(this), 1 / this.FPS);
+		setTimeout(this.Update.bind(this), 1000 / this.FPS);
 	}
 }
 
@@ -276,15 +388,17 @@ gameCanvas.addEventListener("wheel", (ev) => {
 	// Zoom in or out
 	if (ev.deltaY < 0) {
 		// zoom in
-		game.scale += 0.25;
+		game.scale += 0.2;
 	} else {
 		// zoom out
-		game.scale -= 0.25;
+		game.scale -= 0.2;
 	}
 
-	console.log(game.scale);
+	game.scale = Math.round(game.scale * 10) / 10;
 
-	game.scale = Math.min(Math.max(game.scale, 0.5), 10);
+	game.scale = Math.min(Math.max(game.scale, 0.4), 10);
+
+	game.CalculateRenderMap();
 
 	console.log(game.scale);
 });
@@ -295,11 +409,11 @@ document.addEventListener("mousemove", (ev) => {
 });
 
 document.addEventListener("keydown", (ev) => {
-	game.keyMap.add(ev.key);
+	game.keyMap.add(ev.key.toLowerCase());
 });
 
 document.addEventListener("keyup", (ev) => {
-	if (game.keyMap.has(ev.key)) {
-		game.keyMap.delete(ev.key);
+	if (game.keyMap.has(ev.key.toLowerCase())) {
+		game.keyMap.delete(ev.key.toLowerCase());
 	}
 });
