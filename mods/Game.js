@@ -6,6 +6,7 @@ const Nodes = {
 	WATER: 3,
 	GRASS: 4,
 	SAND: 5,
+	CHEESE: 6,
 };
 
 class ResourceNode {
@@ -21,9 +22,17 @@ class ResourceNode {
 	}
 }
 
+function SameCol(x1, w1, x2, w2) {
+	return x1 < x2 + w2 && x1 + x1 > x2;
+}
+
+function SameRow(y1, h1, y2, h2) {
+	return y1 < y2 + h2 && y1 + h1 > y2;
+}
+
 /** @type {x1: number, y1: number, w1: number, h1: number, x2: number, y2: number, w2: number, h2: number} */
 function AABB(x1, y1, w1, h1, x2, y2, w2, h2) {
-	return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+	return SameCol(x1, w1, x2, w2) && SameRow(y1, h1, y2, h2);
 }
 
 export class Game {
@@ -40,7 +49,7 @@ export class Game {
 
 	rows = 5000;
 	rowHeight = 1;
-	columns = 5000;
+	columns = 500000;
 	colWidth = 1;
 	scale = 1;
 	FPS = 60;
@@ -56,6 +65,8 @@ export class Game {
 
 	mouseX = 0;
 	mouseY = 0;
+	mouseDown = false;
+
 	/** @type {ResourceNode | null} */
 	hoveredNode = null;
 
@@ -82,8 +93,6 @@ export class Game {
 			this.scale = Math.min(Math.max(this.scale, 0.4), 10);
 
 			this.CalculateRenderMap();
-
-			console.log(this.scale);
 		});
 
 		document.addEventListener("mousemove", (ev) => {
@@ -99,6 +108,14 @@ export class Game {
 			if (this.keyMap.has(ev.key.toLowerCase())) {
 				this.keyMap.delete(ev.key.toLowerCase());
 			}
+		});
+
+		document.addEventListener("mousedown", (ev) => {
+			this.MouseDown();
+		});
+
+		document.addEventListener("mouseup", (ev) => {
+			this.MouseUp();
 		});
 
 		this.Update();
@@ -163,7 +180,11 @@ export class Game {
 			node = Nodes.SAND;
 		}
 
-		if (waterVal < 0.4) {
+		if (waterVal < 0.37) {
+			node = Nodes.GRASS;
+		}
+
+		if (waterVal > 0.4) {
 			node = Nodes.WATER;
 		}
 
@@ -282,22 +303,38 @@ export class Game {
 		const xPos = this.mouseX - rect.x;
 		const yPos = this.mouseY - rect.y;
 
-		const [w, h] = this.GetWAndH();
+		const w =
+			(this.gameCanvas.getBoundingClientRect().width /
+				this.gameCanvas.width) *
+			this.scale;
+		const h =
+			(this.gameCanvas.getBoundingClientRect().height /
+				this.gameCanvas.height) *
+			this.scale;
 
-		// Convert mouse position to canvas coordinates
 		const canvasX = xPos / w;
 		const canvasY = yPos / h;
 
-		// Convert canvas coordinates to map coordinates, accounting for scale and offset
-		const mapX = (canvasX - this.XOffset) / w;
-		const mapY = (canvasY - this.YOffset) / h;
+		const mapX = canvasX - this.XOffset;
+		const mapY = canvasY - this.YOffset;
 
 		this.hoveredNode = null;
 
-		for (let node of this.culledMap) {
-			if (Math.floor(mapX) === node.x && Math.floor(mapY) === node.y) {
-				console.log(node);
-				this.hoveredNode = node;
+		for (let col of this.culledMap) {
+			let found = false;
+
+			for (let node of col) {
+				if (
+					Math.floor(mapX) === node.x &&
+					Math.floor(mapY) === node.y
+				) {
+					found = true;
+					this.hoveredNode = node;
+					break;
+				}
+			}
+
+			if (found) {
 				break;
 			}
 		}
@@ -329,6 +366,10 @@ export class Game {
 
 			if (node.type === Nodes.SAND) {
 				this.ctx.fillStyle = "rgb(246,215,176)";
+			}
+
+			if (node.type === Nodes.CHEESE) {
+				this.ctx.fillStyle = "rgb(255, 255, 255)";
 			}
 
 			this.ctx.fillRect(node.x, node.y, w + 1, node.height);
@@ -377,6 +418,14 @@ export class Game {
 		);
 	}
 
+	MouseDown() {
+		this.mouseDown = true;
+	}
+
+	MouseUp() {
+		this.mouseDown = false;
+	}
+
 	Update() {
 		this.DrawMap();
 
@@ -406,6 +455,14 @@ export class Game {
 			shouldFindRenderMap = true;
 			this.GenerateCols();
 			this.XOffset -= MoveScale;
+		}
+
+		if (this.mouseDown) {
+			if (this.hoveredNode !== null) {
+				this.hoveredNode.type = Nodes.CHEESE;
+
+				shouldFindRenderMap = true;
+			}
 		}
 
 		if (shouldFindRenderMap) {
